@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <title>API-Fusion Query Builder</title>
+    <link rel="stylesheet"
+          href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" th:href="@{/css/styles.css}">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+</head>
+<body>
+
+<div class="header text-center py-4 bg-primary text-white">
+    <h1>Fusion API Query Builder</h1>
+    <p class="lead">Select parameters to fetch data</p>
+</div>
+
+<div class="container my-5">
+    <form id="select-form" th:action="@{/}" method="post">
+        <div class="row">
+            <div class="col-md-4 mb-4">
+                <div class="card h-100">
+                    <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                        <h5 class="card-title mb-2">Dataset</h5>
+                        <button type="submit" class="btn btn-primary btn-sm purple-button"
+                                id="select-all-dataset-button">Select All
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div class="checkbox-container">
+                            <label th:each="dataset : ${datasets}" class="d-block mb-2">
+                                <input type="checkbox"
+                                       th:name="selectedDatasets"
+                                       th:value="${dataset}"
+                                       th:checked="${selectedDatasets != null and selectedDatasets.contains(dataset)}">
+                                <span th:text="${dataset}"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </form>
+
+    <hr>
+
+    <form id="download-form">
+        <div class="row">
+            <div th:each="type : ${parameters.keySet()}" class="col-md-4 mb-4">
+                <div class="card h-100">
+                    <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                        <div class="d-flex flex-column">
+                            <h5 class="card-title mb-2" th:text="${type}"></h5>
+                            <small class="text-muted card-subtitle"
+                                   th:text="${#strings.replace(parameters.get(type).get('datasets'), '[', '(').replace(']', ')')}"></small>
+                        </div>
+                        <button type="button" class="btn btn-primary btn-sm purple-button"
+                                th:id="|select-all-${#strings.replace(type, ' ', '-')}-button|">Select All
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div class="checkbox-container">
+                            <label th:each="value : ${parameters.get(type).get('values')}" class="d-block mb-2">
+                                <input type="checkbox"
+                                       th:name="${type}"
+                                       th:value="${value}"
+                                       th:checked="${type != null and type.contains(value)}">
+                                <span th:text="${value}"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="text-center mt-4">
+            <button type="submit" class="btn btn-primary btn-lg purple-button">Download</button>
+            <button type="reset" class="btn btn-lg btn-secondary">Reset</button>
+        </div>
+
+        <div class="text-center mt-3">
+            <p class="text-muted">Note that two dots ("..") in the csv file indicate missing data.</p>
+        </div>
+    </form>
+</div>
+
+<script>
+    function showPopup(icon, title, message, color) {
+        if (message && message.trim() !== "" && message !== "null") {
+            Swal.fire({
+                icon: icon,
+                title: title,
+                text: message,
+                confirmButtonColor: color
+            });
+        }
+    }
+
+    document.addEventListener("DOMContentLoaded", function () {
+        let errorMessage = "[[${errorMessage}]]";
+        if (errorMessage !== "") {
+            showPopup("error", "Database Error", errorMessage, "#d33");
+        }
+    });
+
+    document.getElementById("download-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        const downloadButton = document.querySelector("#download-form button[type='submit']")
+        downloadButton.disabled = true;
+        downloadButton.innerText = "Downloading...";
+
+        const formData = new FormData(this);
+        const params = new URLSearchParams(formData);
+
+        try {
+            let response = await fetch("/download", {
+                method: "POST",
+                body: params
+            });
+
+            if (response.status === 204) {
+                showPopup("info", "Data Absence", "No data was received for the selected datasets and parameters.", "#3085d6");
+            } else if (!response.ok) {
+                const errorData = await response.json();
+                showPopup("error", "Data Download Error", errorData.errorMessage, "#d33");
+            } else {
+                let contentDisposition = response.headers.get("Content-Disposition");
+                let filename = contentDisposition.split("filename=")[1].trim();
+
+                let blob = await response.blob();
+                let link = document.createElement("a");
+                link.href = window.URL.createObjectURL(blob);
+                link.download = filename;
+                link.click();
+            }
+        } catch (error) {
+            showPopup("error", "Download Error", "Failed to download data for the selected datasets and parameters.", "#d33");
+        } finally {
+            downloadButton.disabled = false;
+            downloadButton.innerText = "Download";
+        }
+    });
+</script>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        function saveSelectedParameters() {
+            const selectedParameters = {};
+
+            document.querySelectorAll('#download-form input[type="checkbox"]:checked').forEach(checkbox => {
+                const type = checkbox.name;
+                const value = checkbox.value;
+                if (!selectedParameters[type]) {
+                    selectedParameters[type] = [];
+                }
+                selectedParameters[type].push(value);
+            });
+            sessionStorage.setItem('selectedParameters', JSON.stringify(selectedParameters));
+        }
+
+        function restoreSelectedParameters() {
+            const selectedParameters = JSON.parse(sessionStorage.getItem('selectedParameters'));
+            if (selectedParameters) {
+                Object.keys(selectedParameters).forEach(type => {
+                    selectedParameters[type].forEach(value => {
+                        const checkbox = document.querySelector(`input[name='${type}'][value='${value}']`);
+                        if (checkbox) {
+                            checkbox.checked = true;
+                        }
+                    });
+                });
+            }
+        }
+
+        restoreSelectedParameters();
+
+        const parameterCheckboxes = document.querySelectorAll('#download-form input[type="checkbox"]');
+        parameterCheckboxes.forEach(checkbox => {
+            checkbox.addEventListener('change', saveSelectedParameters);
+        });
+
+        const datasetCheckboxes = document.querySelectorAll("input[name='selectedDatasets']");
+        datasetCheckboxes.forEach(checkbox => {
+            checkbox.addEventListener('change', saveSelectedParameters);
+        });
+
+        const selectAllButtons = document.querySelectorAll("[id^='select-all-']");
+        selectAllButtons.forEach(button => {
+            button.addEventListener("click", function () {
+                requestAnimationFrame(saveSelectedParameters);
+            });
+        })
+    });
+
+    document.addEventListener("DOMContentLoaded", function () {
+        const datasetCheckboxes = document.querySelectorAll("input[name='selectedDatasets']");
+        const selectForm = document.getElementById("select-form");
+
+        datasetCheckboxes.forEach(checkbox => {
+            checkbox.addEventListener("change", function () {
+                selectForm.submit();
+            });
+        });
+    });
+    document.addEventListener("DOMContentLoaded", function () {
+        const parameterCheckboxes = document.querySelectorAll("#download-form input[type='checkbox']");
+        const downloadButton = document.querySelector("#download-form button[type='submit']");
+
+        function changeDownloadButtonDisability() {
+            const isChecked = [...parameterCheckboxes].some(checkbox => checkbox.checked);
+            downloadButton.disabled = !isChecked;
+        }
+
+        changeDownloadButtonDisability();
+
+        parameterCheckboxes.forEach(checkbox => {
+            checkbox.addEventListener("change", changeDownloadButtonDisability);
+        });
+
+        const selectAllButtons = document.querySelectorAll("[id^='select-all-']");
+        selectAllButtons.forEach(button => {
+            button.addEventListener("click", function () {
+                requestAnimationFrame(changeDownloadButtonDisability);
+            });
+        });
+    });
+    document.addEventListener("DOMContentLoaded", function () {
+        const resetButton = document.querySelector("button[type='reset']");
+
+        resetButton.addEventListener("click", function () {
+            document.querySelectorAll('input[name="selectedDatasets"]:checked').forEach(checkbox => {
+                checkbox.checked = false;
+            });
+
+            const selectForm = document.getElementById("select-form");
+            selectForm.submit();
+        });
+    });
+    document.addEventListener("DOMContentLoaded", function () {
+        const selectAllButtons = document.querySelectorAll("[id^='select-all-']");
+
+        selectAllButtons.forEach(button => {
+            button.addEventListener("click", function () {
+                const type = button.id.replace("select-all-", '').replace("-button", '').replace(/-/g, ' ');
+
+                let typeCheckboxes;
+                if (type === "dataset") {
+                    typeCheckboxes = document.querySelectorAll(`input[name='selectedDatasets']`);
+                } else {
+                    typeCheckboxes = document.querySelectorAll(`input[name='${type}']`);
+                }
+
+                const typeCheckboxesChecked = Array.from(typeCheckboxes).every(checkbox => checkbox.checked);
+
+                typeCheckboxes.forEach(checkbox => {
+                    checkbox.checked = !typeCheckboxesChecked;
+                });
+            });
+        });
+    });
+</script>
+</body>
+</html>
